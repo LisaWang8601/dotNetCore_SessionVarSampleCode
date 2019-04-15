@@ -1,0 +1,99 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.EntityFrameworkCore;
+using Consulting.Models;
+using Microsoft.AspNetCore.Http;
+
+namespace Consulting.Controllers
+{
+    public class LWWorkSessionController : Controller
+    {
+        private readonly ConsultingContext _context;
+
+        public LWWorkSessionController(ConsultingContext context)
+        {
+            _context = context;
+        }
+
+        // GET: LWWorkSession
+        public async Task<IActionResult> Index(int ContractId, string CustomerName)
+        {
+
+            //set up a current WorkSession object, based on ID passed in. we will use this object to do everything else in the Action
+            var currentWorkSession = _context.WorkSession
+                .Include(ws => ws.Consultant)
+                .Include(ws => ws.Contract)
+                .Where(ws => ws.ContractId == ContractId)
+                .AsQueryable();
+
+            #region FindTotalhoursToPersistIntoSessionVar
+            int totalHours = 0;
+            double totalCost = 0;
+            foreach (var workSession in currentWorkSession)
+            {
+                totalHours += (int)workSession.HoursWorked;
+                totalCost += workSession.ProvincialTax + workSession.TotalChargeBeforeTax;
+
+                string TotalHours = totalHours.ToString();
+                string TotalCost = totalCost.ToString();
+                #endregion
+
+                #region FindAndPersistSessionVarsBasedOnInputParams
+                // check for ContractId and CusomerName and persist them
+                if (ContractId != 0)
+                {
+                    // Set ContactId to Session Var
+                    HttpContext.Session.SetInt32(nameof(ContractId), ContractId);
+
+                    // set totalHours to session var
+                    HttpContext.Session.SetString(nameof(TotalHours), TotalHours);
+
+                    // set totalCost to session var
+                    HttpContext.Session.SetString(nameof(TotalCost), TotalCost);
+
+                    //set customer name to session var
+                    HttpContext.Session.SetString(nameof(CustomerName), string.IsNullOrEmpty(CustomerName) ? await GetCustomerName(ContractId) : CustomerName);
+
+                }
+                else if (HttpContext.Session.GetInt32(nameof(ContractId)) != null)   // what scenario???
+                {
+                    // attach value t session vars
+                    ContractId = (int)HttpContext.Session.GetInt32(nameof(ContractId));
+                    CustomerName = HttpContext.Session.GetString(nameof(CustomerName));
+
+                    // set totalHours to session var
+                    TotalHours = HttpContext.Session.GetString(nameof(TotalHours));
+                    TotalCost = HttpContext.Session.GetString(nameof(TotalCost));
+                }
+                else if (ContractId == 0 && CustomerName == null)
+                {
+                    TempData["message"] = "Please choose another Contract";
+                    return RedirectToAction(nameof(Index));
+                }
+                #endregion
+                //filter based on passed-in criteria
+                var ConsultingContext = _context.WorkSession
+                    .Include(c => c.Contract)
+                    .Where(c => c.ContractId == ContractId)
+                    .ToListAsync();
+
+                return View(await ConsultingContext);
+            }
+            return RedirectToAction(nameof(Index));
+        }
+            // this method is for getting the CustomerName , in case a null was passed in from the contract index
+        public async Task<string> GetCustomerName(int ContractId)
+        {
+           var customerName = _context.Contract
+               .Where(c => c.ContractId == ContractId)
+               .Select(c => c.Customer.CompanyName)
+               .SingleOrDefaultAsync();
+               return await customerName;
+        }
+//...................................above is the code relevant to persisting session variables..........................
+    }
+}
